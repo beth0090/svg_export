@@ -13,7 +13,8 @@ module.exports = async function handler(req, res) {
     return res.status(500).json({ error: 'ANTHROPIC_API_KEY 없음' });
   }
 
-  const body = JSON.stringify(req.body);
+  // body가 이미 파싱된 객체일 수도, 문자열일 수도 있어서 둘 다 처리
+  const body = typeof req.body === 'string' ? req.body : JSON.stringify(req.body);
 
   const options = {
     hostname: 'api.anthropic.com',
@@ -32,7 +33,18 @@ module.exports = async function handler(req, res) {
       let data = '';
       response.on('data', chunk => { data += chunk; });
       response.on('end', () => {
-        res.status(response.statusCode).json(JSON.parse(data));
+        try {
+          // JSON 파싱 시도
+          const parsed = JSON.parse(data);
+          res.status(response.statusCode).json(parsed);
+        } catch (e) {
+          // JSON이 아니면 에러 메시지와 원본 텍스트 같이 반환
+          res.status(500).json({
+            error: 'Anthropic API 응답이 JSON이 아닙니다',
+            status: response.statusCode,
+            raw: data.slice(0, 500),
+          });
+        }
         resolve();
       });
     });
