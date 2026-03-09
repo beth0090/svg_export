@@ -8,23 +8,49 @@ module.exports = async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  const apiKey = process.env.ANTHROPIC_API_KEY;
+  const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
-    return res.status(500).json({ error: 'ANTHROPIC_API_KEY 없음' });
+    return res.status(500).json({ error: 'GEMINI_API_KEY 환경변수가 없습니다.' });
   }
 
-  // body가 이미 파싱된 객체일 수도, 문자열일 수도 있어서 둘 다 처리
-  const body = typeof req.body === 'string' ? req.body : JSON.stringify(req.body);
+  // Anthropic 형식 → Gemini 형식으로 변환
+  const anthropicBody = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
+  
+  // messages 배열에서 이미지와 텍스트 추출
+  const parts = [];
+  for (const msg of anthropicBody.messages || []) {
+    const content = Array.isArray(msg.content) ? msg.content : [{ type: 'text', text: msg.content }];
+    for (const block of content) {
+      if (block.type === 'text') {
+        parts.push({ text: block.text });
+      } else if (block.type === 'image') {
+        parts.push({
+          inlineData: {
+            mimeType: block.source.media_type,
+            data: block.source.data,
+          },
+        });
+      }
+    }
+  }
+
+  const geminiBody = JSON.stringify({
+    contents: [{ parts }],
+    generationConfig: {
+      maxOutputTokens: anthropicBody.max_tokens || 2000,
+    },
+  });
+
+  const model = 'gemini-1.5-flash';
+  const path = `/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
   const options = {
-    hostname: 'api.anthropic.com',
-    path: '/v1/messages',
+    hostname: 'generativelanguage.googleapis.com',
+    path,
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Content-Length': Buffer.byteLength(body),
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
+      'Content-Length': Buffer.byteLength(geminiBody),
     },
   };
 
@@ -34,16 +60,16 @@ module.exports = async function handler(req, res) {
       response.on('data', chunk => { data += chunk; });
       response.on('end', () => {
         try {
-          // JSON 파싱 시도
-          const parsed = JSON.parse(data);
-          res.status(response.statusCode).json(parsed);
+          const geminiRes = JSON.parse(data);
+          
+          // Gemini 응답 → Anthropic 형식으로 변환 (App.jsx가 그대로 동작하도록)
+          const text = geminiRes?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+          const anthropicRes = {
+            content: [{ type: 'text', text }],
+          };
+          res.status(200).json(anthropicRes);
         } catch (e) {
-          // JSON이 아니면 에러 메시지와 원본 텍스트 같이 반환
-          res.status(500).json({
-            error: 'Anthropic API 응답이 JSON이 아닙니다',
-            status: response.statusCode,
-            raw: data.slice(0, 500),
-          });
+          res.status(500).json({ error: 'JSON 파싱 실패', raw: data.slice(0, 300) });
         }
         resolve();
       });
@@ -52,7 +78,7 @@ module.exports = async function handler(req, res) {
       res.status(500).json({ error: err.message });
       resolve();
     });
-    request.write(body);
+    request.write(geminiBody);
     request.end();
   });
 };
