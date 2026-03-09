@@ -9,7 +9,6 @@ const C = {
 async function callClaude(messages, maxTokens = 2000) {
   const apiKey = localStorage.getItem("pf_gemini_key") || "";
 
-  // Gemini 형식으로 변환
   const parts = [];
   for (const msg of messages) {
     const content = Array.isArray(msg.content) ? msg.content : [{ type: "text", text: msg.content }];
@@ -22,8 +21,9 @@ async function callClaude(messages, maxTokens = 2000) {
     }
   }
 
+  // gemini-2.0-flash 모델 사용
   const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${apiKey}`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
