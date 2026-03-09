@@ -1,6 +1,6 @@
-import https from 'https';
+const https = require('https');
 
-export default async function handler(req, res) {
+module.exports = async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -10,7 +10,7 @@ export default async function handler(req, res) {
 
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
-    return res.status(500).json({ error: 'ANTHROPIC_API_KEY 환경변수가 없습니다.' });
+    return res.status(500).json({ error: 'ANTHROPIC_API_KEY 없음' });
   }
 
   const body = JSON.stringify(req.body);
@@ -32,21 +32,15 @@ export default async function handler(req, res) {
       let data = '';
       response.on('data', chunk => { data += chunk; });
       response.on('end', () => {
-        try {
-          res.status(response.statusCode).json(JSON.parse(data));
-        } catch (e) {
-          res.status(500).json({ error: 'JSON 파싱 실패', raw: data.slice(0, 200) });
-        }
+        res.status(response.statusCode).json(JSON.parse(data));
         resolve();
       });
     });
-
     request.on('error', (err) => {
       res.status(500).json({ error: err.message });
       resolve();
     });
-
     request.write(body);
     request.end();
   });
-}
+};
