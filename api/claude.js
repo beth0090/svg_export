@@ -1,4 +1,6 @@
-export default async function handler(req, res) {
+const https = require('https');
+
+module.exports = async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -6,26 +8,45 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  // API 키는 Vercel 환경변수에서 가져옴 (클라이언트에 노출 안 됨)
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
-    return res.status(500).json({ error: 'ANTHROPIC_API_KEY 환경변수가 설정되지 않았습니다.' });
+    return res.status(500).json({ error: 'ANTHROPIC_API_KEY 환경변수가 없습니다.' });
   }
 
-  try {
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify(req.body),
+  const body = JSON.stringify(req.body);
+
+  const options = {
+    hostname: 'api.anthropic.com',
+    path: '/v1/messages',
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Content-Length': Buffer.byteLength(body),
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+    },
+  };
+
+  return new Promise((resolve) => {
+    const request = https.request(options, (response) => {
+      let data = '';
+      response.on('data', chunk => { data += chunk; });
+      response.on('end', () => {
+        try {
+          res.status(response.statusCode).json(JSON.parse(data));
+        } catch (e) {
+          res.status(500).json({ error: 'JSON 파싱 실패', raw: data.slice(0, 200) });
+        }
+        resolve();
+      });
     });
 
-    const data = await response.json();
-    return res.status(response.status).json(data);
-  } catch (err) {
-    return res.status(500).json({ error: err.message });
-  }
-}
+    request.on('error', (err) => {
+      res.status(500).json({ error: err.message });
+      resolve();
+    });
+
+    request.write(body);
+    request.end();
+  });
+};
