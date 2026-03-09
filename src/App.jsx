@@ -7,17 +7,35 @@ const C = {
 };
 
 async function callClaude(messages, maxTokens = 2000) {
-  // Vercel 프록시를 통해 호출 — API 키는 서버 환경변수에서 처리
-  const res = await fetch("/api/claude", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: maxTokens, messages }),
-  });
+  const apiKey = localStorage.getItem("pf_gemini_key") || "";
+
+  // Gemini 형식으로 변환
+  const parts = [];
+  for (const msg of messages) {
+    const content = Array.isArray(msg.content) ? msg.content : [{ type: "text", text: msg.content }];
+    for (const block of content) {
+      if (block.type === "text") {
+        parts.push({ text: block.text });
+      } else if (block.type === "image") {
+        parts.push({ inlineData: { mimeType: block.source.media_type, data: block.source.data } });
+      }
+    }
+  }
+
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ parts }],
+        generationConfig: { maxOutputTokens: maxTokens },
+      }),
+    }
+  );
   const data = await res.json();
-  if (!res.ok || data.error) throw new Error(data.error?.message || `HTTP ${res.status}`);
-  return data.content.map(b => b.text || "").join("");
+  if (!res.ok) throw new Error(data?.error?.message || `HTTP ${res.status}`);
+  return data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
 }
 
 function resizeImage(base64, mime) {
@@ -123,6 +141,9 @@ function BeforeAfterSlider({ originalSrc, previewUrl, isGenerating }) {
 
 // ════════════════════════════════════════════════
 export default function PathForm() {
+  const [geminiKey, setGeminiKey] = useState(() => localStorage.getItem("pf_gemini_key") || "");
+  const [keyInput, setKeyInput] = useState("");
+  const [showKeyModal, setShowKeyModal] = useState(false);
   const [stage, setStage] = useState(1);
   const [imageB64, setImageB64] = useState(null);
   const [imageMime, setImageMime] = useState(null);
@@ -372,6 +393,37 @@ Output ONLY raw SVG. viewBox="0 0 500 500" width="500" height="500". <path> in <
     <div style={{ fontFamily: "'Space Mono',monospace", background: C.bg, color: C.text, minHeight: "100vh", position: "relative" }}>
       <div style={{ position: "fixed", inset: 0, backgroundImage: `linear-gradient(rgba(127,255,178,0.025) 1px,transparent 1px),linear-gradient(90deg,rgba(127,255,178,0.025) 1px,transparent 1px)`, backgroundSize: "40px 40px", pointerEvents: "none", zIndex: 0 }} />
 
+      {/* API KEY 모달 */}
+      {showKeyModal && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 6, padding: 32, width: 420, maxWidth: "90vw" }}>
+            <div style={{ fontSize: 12, letterSpacing: 3, color: C.muted, textTransform: "uppercase", marginBottom: 16 }}>GEMINI API KEY 설정</div>
+            <div style={{ fontSize: 11, color: C.muted, lineHeight: 1.9, marginBottom: 20 }}>
+              <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" style={{ color: C.accent3 }}>aistudio.google.com</a>에서 무료로 발급받으세요.<br/>
+              키는 이 브라우저에만 저장되며 외부로 전송되지 않습니다.
+            </div>
+            <input
+              type="password"
+              placeholder="AIza..."
+              value={keyInput}
+              onChange={e => setKeyInput(e.target.value)}
+              style={{ width: "100%", background: C.panel, border: `1px solid ${C.border}`, color: C.text, fontFamily: "'Space Mono',monospace", fontSize: 11, padding: "10px 12px", borderRadius: 2, outline: "none", marginBottom: 14 }}
+            />
+            <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+              <button onClick={() => setShowKeyModal(false)}
+                style={{ padding: "8px 16px", background: "transparent", border: `1px solid ${C.border}`, color: C.muted, fontSize: 10, cursor: "pointer", borderRadius: 2, fontFamily: "inherit" }}>취소</button>
+              <button onClick={() => {
+                const k = keyInput.trim();
+                if (!k) return;
+                setGeminiKey(k);
+                localStorage.setItem("pf_gemini_key", k);
+                setShowKeyModal(false);
+              }} style={{ padding: "8px 18px", background: C.accent, color: "#0a0a0f", border: "none", fontWeight: 800, fontSize: 11, cursor: "pointer", borderRadius: 2 }}>저장</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* HEADER */}
       <div style={{ position: "sticky", top: 0, zIndex: 200, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 24px", borderBottom: `1px solid ${C.border}`, background: "rgba(10,10,15,0.93)", backdropFilter: "blur(12px)" }}>
         <div style={{ fontWeight: 800, fontSize: 18, letterSpacing: -0.5 }}>PATH<span style={{ color: C.accent }}>FORM</span></div>
@@ -388,7 +440,10 @@ Output ONLY raw SVG. viewBox="0 0 500 500" width="500" height="500". <path> in <
             </div>
           ))}
         </div>
-        <div style={{ fontSize: 10, color: C.muted, letterSpacing: 2 }}>v2.1</div>
+        <button onClick={() => { setKeyInput(geminiKey); setShowKeyModal(true); }}
+          style={{ padding: "6px 14px", background: "transparent", border: `1px solid ${geminiKey ? C.accent : C.accent2}`, color: geminiKey ? C.accent : C.accent2, fontSize: 9, letterSpacing: 2, cursor: "pointer", borderRadius: 2, fontFamily: "inherit" }}>
+          {geminiKey ? "✓ API KEY" : "⚠ API KEY 필요"}
+        </button>
       </div>
 
       {/* ══ STAGE 1 ══ */}
